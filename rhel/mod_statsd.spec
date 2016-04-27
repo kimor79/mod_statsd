@@ -32,7 +32,7 @@ mkdir -p $RPM_BUILD_ROOT/etc/httpd/conf.modules.d
 
 # installing binaries ...
 
-cp -a $RPM_BUILD_DIR/statsd.load $RPM_BUILD_ROOT/etc/httpd/conf.modules.d/statsd.conf
+cp -a $RPM_BUILD_DIR/%{name}/statsd.load $RPM_BUILD_ROOT/etc/httpd/conf.modules.d/statsd.conf
 cp -a $RPM_BUILD_DIR/usr/lib64/httpd/modules/* $RPM_BUILD_ROOT/usr/lib64/httpd/modules/
 
 %clean
