@@ -86,6 +86,8 @@ typedef struct {
                     // List of regexes to exclude path parts from stats
     apr_array_header_t *http_verbs;
                     // HTTP verbs that will be logged seperately
+    apr_array_header_t *duration_thresholds;
+                    // Duration thresholds that will be bucketed
 } settings_rec;
 
 module AP_MODULE_DECLARE_DATA statsd_module;
@@ -399,6 +401,58 @@ static int request_hook(request_rec *r)
                     );
     }
 
+    if( cfg->duration_thresholds->nelts > 0) {
+
+        int i;
+        for( i = 0; i < cfg->duration_thresholds->nelts; i++ ) {
+            const wanted_duration_threshold = ((apr_int64_t **)cfg->duration_thresholds->elts)[i];
+            if( apr_atoi64(duration) >= wanted_duration_threshold ) {
+                char *duration_threshold_stat;
+
+                if( cfg->telegraf_mode ) {
+                    char nkey[strlen(key) - 1];
+                    apr_cpystrn(nkey, key, strlen(key));
+
+                    duration_threshold_stat = apr_pstrcat(
+                                    r->pool,
+                                    cfg->prefix,
+                                    nkey,
+                                    cfg->suffix,
+                                    ",method=",
+                                    verb,
+                                    ",response_code=",
+                                    apr_psprintf(r->pool, "%d", r->status),
+                                    ",duration_threshold=",
+                                    apr_psprintf(r->pool, "%d", wanted_duration_threshold),
+                                    NULL
+                                 );
+                } else {
+                    duration_threshold_stat = apr_pstrcat(
+                                    r->pool,
+                                    cfg->prefix,
+                                    key,         // no dot between key & method because key
+                                    verb,        // will always end in a dot.
+                                    ".",
+                                    apr_psprintf(r->pool, "%d", r->status),
+                                    ".",
+                                    apr_psprintf(r->pool, "%d", wanted_duration_threshold),
+                                    cfg->suffix,
+                                    NULL
+                                 );
+                }
+
+
+                 _DEBUG && fprintf( stderr, "duration threshold stat: %s\n", duration_threshold_stat );
+                to_send = apr_pstrcat(
+                                r->pool,
+                                to_send, "\n",  // stats so far
+                                duration_threshold_stat, ":1|c",   // counter
+                                NULL
+                            );
+            }
+        }
+    }
+
     // You may have also asked for an aggregate stat. If so, add it here.
     if( strlen( cfg->aggregate_stat ) ) {
         char *aggregate_stat;
@@ -493,19 +547,20 @@ static void *init_settings(apr_pool_t *p, char *d)
     settings_rec *cfg;
 
     cfg = (settings_rec *) apr_pcalloc(p, sizeof(settings_rec));
-    cfg->enabled        = 0;
-    cfg->legacy_mode    = 1;    // default to on, like statsd does:
-                                // https://github.com/etsy/statsd/blob/v0.6.0/exampleConfig.js#L57
-    cfg->telegraf_mode  = 0;
-    cfg->divider        = 1000; // default to milliseconds for timing
-    cfg->host           = "localhost";
-    cfg->port           = "8125";
-    cfg->stat           = "";
-    cfg->prefix         = "";
-    cfg->suffix         = "";
-    cfg->aggregate_stat = "";
-    cfg->exclude_regex  = apr_array_make(p, 2, sizeof(ap_regex_t*) );
-    cfg->http_verbs     = apr_array_make(p, 2, sizeof(const char*) );
+    cfg->enabled             = 0;
+    cfg->legacy_mode         = 1;   // default to on, like statsd does:
+                                   // https://github.com/etsy/statsd/blob/v0.6.0/exampleConfig.js#L57
+    cfg->telegraf_mode       = 0;
+    cfg->divider             = 1000; // default to milliseconds for timing
+    cfg->host                = "localhost";
+    cfg->port                = "8125";
+    cfg->stat                = "";
+    cfg->prefix              = "";
+    cfg->suffix              = "";
+    cfg->aggregate_stat      = "";
+    cfg->exclude_regex       = apr_array_make(p, 2, sizeof(ap_regex_t*) );
+    cfg->http_verbs          = apr_array_make(p, 2, sizeof(const char*) );
+    cfg->duration_thresholds = apr_array_make(p, 2, sizeof(apr_int64_t*) );
 
     return cfg;
 }
@@ -621,6 +676,17 @@ static const char *set_config_value(cmd_parms *cmd, void *mconfig,
         _DEBUG && fprintf( stderr, "http verbs as str = %s\n", ary );
 
 
+    // A specific list of durations to send counters for if the request is greater than given duration
+    } else if( strcasecmp(name, "StatsdDurationThresholds") == 0 ) {
+
+        // following tutorial here:
+        // http://dev.ariel-networks.com/apr/apr-tutorial/html/apr-tutorial-19.html
+        const char *str                                          = apr_pstrdup(cmd->pool, value);
+        *(apr_int64_t**)apr_array_push(cfg->duration_thresholds) = apr_atoi64(str);
+
+        _DEBUG && fprintf( stderr, "duration thresholds = %s\n", str );
+
+
     } else {
         return apr_psprintf(cmd->pool, "No such variable %s", name);
     }
@@ -684,6 +750,8 @@ static const command_rec commands[] = {
                     "A list of regexes of path parts to exclude from stats" ),
     AP_INIT_ITERATE("StatsdHTTPVerbs",    set_config_value,   NULL, OR_FILEINFO,
                     "A list of HTTP verbs that will be logged separately" ),
+    AP_INIT_ITERATE("StatsdDurationThresholds", set_config_value,   NULL, OR_FILEINFO,
+                    "List of durations to send counters for" ),
     AP_INIT_TAKE1(  "StatsdAggregateStat", set_config_value,   NULL, OR_FILEINFO,
                     "Aggregate stats key to use for all requests"),
     {NULL}

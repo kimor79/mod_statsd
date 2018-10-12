@@ -257,6 +257,19 @@ sections of the configuration.
     A GET request to /foo/bar would produce the stat foo.bar.GET.200, but
     a HEAD request to /foo/bar would produce foo.bar.OtherVerbs.200
 
+*** StatsdDurationThresholds directive
+    Syntax:     StatsdDurationThresholds number [, number, ...]
+    Default:    NULL
+
+    This directive allows you to specify a list of duration thresholds that
+    if the request takes longer than, a counter will be incremented for the
+    given threshold.
+
+    if the thresholds 100 and 500 were configured:
+    A 300ms GET request to /foo/bar would produce the stat foo.bar.GET.200.100
+    and a 600ms request would produce a stat for foo.bar.GET.200.100 as well
+    as foo.bar.GET.200.500
+
 *** StatsdLegacyMode directive
     Syntax:     StatsdLegacyMode on|off
     Default:    StatsdLegacyMode on
